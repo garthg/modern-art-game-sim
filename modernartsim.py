@@ -6,7 +6,7 @@
 # - Only plays the first round (the one with max 30 value per painting)
 # - Paintings are random order of 4x30, 3x20, 2x10 (9 paintings), not chosen strategically by players
 # - Auction types are just combined and we simulate by taking the average of the two highest bids as the final price (sometimes seller-favored, sometimes buyer-favored, so we average it??)
-# - Players have unlimited cash (their spend is simply debited from their final painting value)
+# - Players always start with 100 cash and if they don't have enough to make their desired bid they bid their whole cash
 
 
 import random
@@ -20,21 +20,25 @@ class Player:
 
 
 class P_Noop(Player):
+    # never buys
     name = 'Noop'
     def step(self, state):
         return 0;
 
 class P_Big(Player):
+    # bids up to value of painting minus one dollar
     name = 'BigSpender'
     def step(self, state):
         return state['paintings'][-1]-1
 
 class P_Even(Player):
+    # bids half the painting value for an even split
     name = 'EvenSteven'
     def step(self, state):
         return state['paintings'][-1]//2
 
 class P_Ratio(Player):
+    # bids the proportion of the value that is passed in the constructor
     name = 'Ratio'
 
     def __init__(self, ratio):
@@ -44,6 +48,7 @@ class P_Ratio(Player):
         return math.floor(state['paintings'][-1] * self.ratio)
 
 class P_MeVsYou(Player):
+    # bids low if the seller is its top competitor and it is currently not winning, otherwise bids high
     name = 'MeVsYou'
 
     def step(self, state):
