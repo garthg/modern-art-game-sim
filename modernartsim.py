@@ -4,8 +4,8 @@
 # - All players have continuous perfect knowledge of everybody’s cash
 # - All players have continuous access to an identical perfect oracle that tells them what the painting is going to be worth at the end
 # - Only plays the first round (the one with max 30 value per painting)
-# - Paintings are random order of 4x30, 3x20, 2x10 (9 paintings), not chosen strategically by players
-# - Auction types are just combined and we simulate by taking the average of the two highest bids as the final price (sometimes seller-favored, sometimes buyer-favored, so we average it??)
+# - Painting final values are random order of 4x30, 3x20, 2x10 (9 paintings), not chosen strategically by players
+# - Auction types are 50-50 open and sealed, if open then purchase price is second-highest max bid + 1, otherwise purchase is highest max bid
 # - Players always start with 100 cash and if they don't have enough to make their desired bid they bid their whole cash
 
 
@@ -47,6 +47,29 @@ class P_Ratio(Player):
     def step(self, state):
         return math.floor(state['paintings'][-1] * self.ratio)
 
+class P_FixedProfit(Player):
+    # bids such that it would get the specified profit amount
+    name = 'Gain'
+
+    def __init__(self, gain):
+        self.gain = gain
+        self.name += str(gain)
+
+    def step(self, state):
+        return max(0, state['paintings'][-1] - self.gain)
+
+class P_Random(Player):
+    name = 'Random'
+    min_ratio = 0.5
+
+    def __init__(self, name_suffix=''):
+        if name_suffix is not None:
+            self.name += name_suffix
+
+    def step(self, state):
+        v = state['paintings'][-1]
+        return math.floor(self.min_ratio*v) + math.floor(random.random() * (1-self.min_ratio) * state['paintings'][-1])
+
 class P_MeVsYou(Player):
     # bids low if the seller is its top competitor and it is currently not winning, otherwise bids high
     name = 'MeVsYou'
@@ -80,7 +103,9 @@ class Game:
             'round':0,
             'turn':0,
             'paintings':[],
-            'player_names': list(x.name for x in self.players)
+            'player_names': list(x.name for x in self.players),
+            'auction_types': [],
+            'sales': [],
         }
         for i in range(len(self.players)):
             self.state['scores'][i] = {
@@ -88,9 +113,11 @@ class Game:
                 'painting_value':0,
             }
         self.paintings = list(sorted([30]*4 + [20]*3 + [10]*2, key=lambda x: random.random()))
+        self.auction_types = list('open' if random.random() > 0.5 else 'sealed' for x in range(len(self.paintings)))
 
-    def round(self, painting):
+    def turn(self, painting, auction_type):
         self.state['paintings'] += [painting]
+        self.state['auction_types'] += [auction_type]
 
         high_bid = 0;
         second_bid = 0;
@@ -113,12 +140,17 @@ class Game:
             if self.doprint:
                 print(f'after {self.players[i].name} {curr_max_bid}: top is {self.players[buyer].name} with {high_bid} {second_bid}')
         if buyer >= 0:
-            final_price = (high_bid + second_bid)//2
+            final_price = second_bid + 1 if auction_type == 'open' else high_bid
             self.state['scores'][buyer]['cash'] -= final_price
             self.state['scores'][seller]['cash'] += final_price
             self.state['scores'][buyer]['painting_value'] += self.state['paintings'][-1]
+            self.state['sales'] += [final_price]
             if self.doprint:
                 print(f'{self.players[seller].name} sold to {self.players[buyer].name} value {painting} for {final_price} on bids {high_bid} {second_bid}')
+        else:
+            self.state['sales'] += [None]
+            if self.doprint:
+                print(f'{self.players[seller].name} did not find a buyer')
         self.state['round'] += 1
         self.state['turn'] = (self.state['turn'] + 1) % len(self.players)
 
@@ -135,15 +167,17 @@ class Game:
 
     def run(self):
         for i in range(len(self.paintings)):
-            self.round(self.paintings[i])
+            self.turn(self.paintings[i], self.auction_types[i])
 
 
 
-def simulate(players, n):
+def simulate(players, n, shuffle_order=True):
     scores = {}
     for p in players:
         scores[p.name] = [0, 0, 0]
     for i in range(n):
+        if shuffle_order:
+            players.sort(key=lambda x: random.random())
         g = Game(players)
         g.run()
         curr_s = g.state['scores']
@@ -158,9 +192,11 @@ def simulate(players, n):
             scores[p.name][s] /= n
     print()
     print('== AVERAGE SCORES =============')
-    print('\t'.join(['player'.rjust(20, ' '), 'total', 'cash', 'paintings']))
+    print('\t'.join(['player'.rjust(20, ' '), '  total    ', '   cash    ', '   paintings   ']))
     for p in sorted(players, key=lambda x: scores[x.name][0], reverse=True):
-        print('\t'.join([p.name.rjust(20, ' ')]+[str(x) for x in scores[p.name]]))
+        print('\t'.join([p.name.rjust(20, ' ')]+[str(x).ljust(10) for x in scores[p.name]]))
+    return scores
+
 
 
 
@@ -168,12 +204,17 @@ def simulate(players, n):
 
 if __name__ == '__main__':
     players = [
-        P_Noop(),
-        P_Big(),
-        P_Even(),
+        #P_Noop(),
+        #P_Even(),
         P_MeVsYou(),
-        #P_Ratio(.66),
-        #P_Ratio(.6)
+        P_Ratio(.66),
+        #P_Ratio(.8),
+        #P_FixedProfit(7),
+        #P_Ratio(.4),
+        P_Big(),
+        P_Random('M'),
+        #P_Random('F'),
+        #P_Random('L'),
     ]
 
     #Game(players, True).run()
