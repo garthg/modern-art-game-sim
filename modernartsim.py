@@ -7,10 +7,15 @@
 # - Painting final values are random order of 4x30, 3x20, 2x10 (9 paintings), not chosen strategically by players
 # - Auction types are 50-50 open and sealed, if open then purchase price is second-highest max bid + 1, otherwise purchase is highest max bid
 # - Players always start with 100 cash and if they don't have enough to make their desired bid they bid their whole cash
+# - Players never bid on their own auctions
 
 
 import random
 import math
+
+
+starting_cash = 100
+
 
 class Player:
     name = None
@@ -27,7 +32,12 @@ class P_Noop(Player):
 
 class P_Big(Player):
     # bids up to value of painting minus one dollar
-    name = 'BigSpender'
+
+    def __init__(self, override_name=None):
+        self.name = 'BigSpender'
+        if override_name:
+            self.name = override_name
+
     def step(self, state):
         return state['paintings'][-1]-1
 
@@ -92,6 +102,32 @@ class P_MeVsYou(Player):
         return math.floor(0.8 * state['paintings'][-1])
 
 
+class P_MeVsYouMFL(Player):
+    # bids two thirds if the seller is its top competitor, otherwise bids high
+
+    def __init__(self, override_name=None):
+        self.name = 'MeVsYouMFL'
+        if override_name:
+            self.name = override_name
+
+    def step(self, state):
+        player_ids = list(range(len(state['player_names'])))
+        not_me_ids = list(filter(lambda x: state['player_names'][x] != self.name, player_ids))
+        my_id = list(filter(lambda x: state['player_names'][x] == self.name, player_ids))[0]
+        highest_competitor = not_me_ids[0]
+        highest_competitor_score = None
+        for n in not_me_ids:
+            score = state['scores'][n]['cash'] + state['scores'][n]['painting_value']
+            if highest_competitor_score is None or score > highest_competitor_score:
+                highest_competitor_score = score
+                highest_competitor = n
+        my_score = state['scores'][my_id]['cash'] + state['scores'][my_id]['painting_value']
+        seller_id = state['turn']
+        if seller_id == highest_competitor:
+            return math.floor(0.66 * state['paintings'][-1])
+        return state['paintings'][-1] - 1
+
+
 
 class Game:
 
@@ -109,7 +145,7 @@ class Game:
         }
         for i in range(len(self.players)):
             self.state['scores'][i] = {
-                'cash':100,
+                'cash':starting_cash,
                 'painting_value':0,
             }
         self.paintings = list(sorted([30]*4 + [20]*3 + [10]*2, key=lambda x: random.random()))
@@ -129,7 +165,10 @@ class Game:
         for i in range(len(self.players)):
             if i == seller:
                 continue
-            curr_max_bid = min(self.state['scores'][i]['cash'], self.players[i].step(self.state))
+            p_i_bid = self.players[i].step(self.state)
+            if self.doprint:
+                print(f'player {self.players[i].name} bids {p_i_bid}')
+            curr_max_bid = min(self.state['scores'][i]['cash'], p_i_bid)
             if curr_max_bid > high_bid:
                 second_bid = high_bid
                 high_bid = curr_max_bid
@@ -173,28 +212,41 @@ class Game:
 
 def simulate(players, n, shuffle_order=True):
     scores = {}
+    wins = {}
     for p in players:
         scores[p.name] = [0, 0, 0]
+        wins[p.name] = 0
     for i in range(n):
         if shuffle_order:
             players.sort(key=lambda x: random.random())
         g = Game(players)
         g.run()
         curr_s = g.state['scores']
+        winner = None
+        winner_score = None
         for p in range(len(players)):
             name = players[p].name
             ps = curr_s[p]
             scores[name][1] += ps['cash']
             scores[name][2] += ps['painting_value']
-            scores[name][0] += ps['cash'] + ps['painting_value']
+            total_score = ps['cash'] + ps['painting_value']
+            scores[name][0] += total_score
+            if winner is None or total_score > winner_score:
+                winner = name
+                winner_score = total_score
+        wins[winner] += 1
     for p in players:
         for s in range(3):
             scores[p.name][s] /= n
+        wins[p.name] /= n
     print()
     print('== AVERAGE SCORES =============')
     print('\t'.join(['player'.rjust(20, ' '), '  total    ', '   cash    ', '   paintings   ']))
     for p in sorted(players, key=lambda x: scores[x.name][0], reverse=True):
         print('\t'.join([p.name.rjust(20, ' ')]+[str(x).ljust(10) for x in scores[p.name]]))
+    print('== AVERAGE WINS ================')
+    for p in sorted(players, key=lambda x: wins[x.name], reverse=True):
+        print('\t'.join([p.name.rjust(20, ' ')]+[str(wins[p.name]).ljust(10)]))
     return scores
 
 
@@ -205,14 +257,17 @@ def simulate(players, n, shuffle_order=True):
 if __name__ == '__main__':
     players = [
         #P_Noop(),
-        #P_Even(),
-        P_MeVsYou(),
+        P_Even(),
+        P_MeVsYouMFL(),
+        #P_MeVsYou(),
+        P_Big(),
+        #P_Big('b2'),
+        #P_Big('b3'),
         P_Ratio(.66),
         #P_Ratio(.8),
         #P_FixedProfit(7),
         #P_Ratio(.4),
-        P_Big(),
-        P_Random('M'),
+        #P_Random('M'),
         #P_Random('F'),
         #P_Random('L'),
     ]
